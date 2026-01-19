@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Slendytubbies: Origins - The Evil Plan</title>
+    
+    <style>
+        :root { --accent: #ff00ff; --danger: #ff0000; --gui: rgba(0,0,0,0.8); }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; width: 100vw; height: 100vh; }
+
+        /* HUD */
+        #ui-container { position: absolute; top: 20px; width: 100%; display: flex; justify-content: center; z-index: 1500; pointer-events: none; }
+        #contador { background: var(--gui); color: var(--accent); padding: 10px 20px; border: 1px solid var(--accent); font-weight: bold; }
+        
+        /* Diálogos */
+        #dialog-box { position: absolute; bottom: 150px; width: 90%; left: 5%; background: var(--gui); color: #fff; padding: 15px; border: 2px solid #00ff00; z-index: 2500; display: none; font-size: 1rem; }
+
+        /* Controles */
+        .joystick-base { position: absolute; width: 110px; height: 110px; background: rgba(255,255,255,0.1); border: 2px solid var(--accent); border-radius: 50%; z-index: 2000; bottom: 40px; }
+        #joy-move { left: 25px; }
+        #joy-look { right: 25px; }
+        .knob { position: absolute; width: 45px; height: 45px; background: var(--accent); border-radius: 50%; top: 30px; left: 30px; }
+        #jump-btn { position: absolute; right: 35px; bottom: 170px; width: 65px; height: 65px; background: rgba(255, 0, 255, 0.2); border: 2px solid var(--accent); border-radius: 50%; color: white; z-index: 2000; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+
+        /* Pantallas */
+        .overlay-screen { position: absolute; width: 100%; height: 100%; z-index: 3000; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--accent); text-align: center; background: #000; }
+        .fuego-anim { width: 120px; height: 120px; background: orange; filter: blur(25px); border-radius: 50%; position: absolute; bottom: 20%; animation: llamarada 0.6s infinite alternate; opacity: 0.6; }
+        @keyframes llamarada { from { transform: scale(1); } to { transform: scale(1.6); } }
+
+        .play-btn { padding: 15px 30px; background: rgba(0,0,0,0.6); color: var(--accent); border: 1px solid var(--accent); cursor: pointer; font-weight: bold; margin: 10px; width: 280px; text-transform: uppercase; }
+        #jumpscare { position: absolute; width: 100%; height: 100%; background: #000; z-index: 5000; display: none; align-items: center; justify-content: center; }
+        #jumpscare img { width: 100%; height: 100%; object-fit: cover; }
+    </style>
+</head>
+<body>
+
+    <div id="jumpscare"><img src="https://i.imgur.com/vHqQ9zS.jpg"></div>
+
+    <div id="ui-container"><div id="contador">PAPILLAS: 0/10</div></div>
+    <div id="dialog-box"><b>NOO-NOO:</b> <span id="dialog-text">...</span></div>
+    
+    <div id="joy-move" class="joystick-base"><div id="move-knob" class="knob"></div></div>
+    <div id="joy-look" class="joystick-base"><div id="look-knob" class="knob"></div></div>
+    <div id="jump-btn">SALTO</div>
+
+    <div id="menu-inicio" class="overlay-screen">
+        <div class="fuego-anim"></div>
+        <h1 style="font-size: 3rem; text-shadow: 0 0 20px red;">ST: ORIGINS</h1>
+        <button class="play-btn" onclick="setMode('history')">MODO HISTORIA</button>
+        <button class="play-btn" onclick="setMode('collect')">RECOGER PAPILLAS</button>
+    </div>
+
+    <div id="menu-tiempo" class="overlay-screen" style="display:none">
+        <h2>HORA DEL DÍA</h2>
+        <button class="play-btn" onclick="startGame('dia')">DÍA</button>
+        <button class="play-btn" onclick="startGame('atardecer')">ATARDECER</button>
+        <button class="play-btn" onclick="startGame('noche')">NOCHE</button>
+    </div>
+
+    <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, player, enemies = [], papillas = [], decor = [];
+        let score = 0, gameActive = false, mode = 'collect';
+        let moveInput = {x:0, y:0}, lookInput = {x:0, y:0}, vy = 0, isGrounded = true;
+
+        function setMode(m) {
+            mode = m;
+            showScreen('menu-inicio', 'menu-tiempo');
+        }
+
+        function showScreen(hide, show) {
+            document.getElementById(hide).style.display = 'none';
+            document.getElementById(show).style.display = 'flex';
+        }
+
+        function initScene(tiempo) {
+            scene = new THREE.Scene();
+            let sky = 0x000000, fog = 0x000000, lightInt = 0.1;
+            if(tiempo === 'dia') { sky = 0x87CEEB; fog = 0x87CEEB; lightInt = 0.8; }
+            if(tiempo === 'atardecer') { sky = 0x442200; fog = 0x442200; lightInt = 0.4; }
+
+            scene.background = new THREE.Color(sky);
+            scene.fog = new THREE.Fog(fog, 1, 75);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            player = new THREE.Group();
+            player.position.set(0, 0, 20); 
+            scene.add(player);
+            player.add(camera);
+            camera.position.y = 1.7;
+
+            // Suelo
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshStandardMaterial({color: 0x112211}));
+            ground.rotation.x = -Math.PI/2;
+            scene.add(ground);
+
+            // Casa Teletubbie (Verde)
+            const dome = new THREE.Mesh(
+                new THREE.SphereGeometry(15, 32, 16, 0, Math.PI*2, 0, Math.PI/2), 
+                new THREE.MeshStandardMaterial({color: 0x225522, side: THREE.DoubleSide})
+            );
+            dome.position.set(-40, 0, -40);
+            scene.add(dome);
+
+            // Noo-Noo (Dentro de la casa)
+            const noonoo = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 3), new THREE.MeshStandardMaterial({color: 0x0000ff}));
+            noonoo.position.set(-40, 0.75, -40);
+            noonoo.userData = { isNooNoo: true };
+            scene.add(noonoo);
+
+            // Dipsy (Dentro de la casa)
+            createTeletubbie(0x005500, "Dipsy", -35, -40, "recta");
+
+            // Laa-Laa (Playa/Suelo)
+            const laalaa = createTeletubbie(0xaaaa00, "Laa-Laa", 40, 0, "rayo");
+            laalaa.rotation.z = Math.PI/2; laalaa.position.y = 0.5;
+
+            // Po (Colgada)
+            const po = createTeletubbie(0x770000, "Po", -10, 50, "circulo");
+            po.position.y = 5;
+
+            // Árboles con hojas
+            for(let i=0; i<45; i++) {
+                const x = Math.random()*200-100, z = Math.random()*200-100;
+                if(Math.abs(x) > 15 || Math.abs(z) > 15) createDetailedTree(x, z);
+            }
+
+            // Enemigo Acechante
+            enemies.push(createTeletubbie(0x2a0050, "Tinky", 10, -60, "triangulo"));
+
+            // Papillas
+            for(let i=0; i<10; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff}));
+                p.position.set(Math.random()*160-80, 0.5, Math.random()*160-80);
+                scene.add(p); papillas.push(p);
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, lightInt));
+            const light = new THREE.SpotLight(0xffffff, 4, 60, 0.4);
+            camera.add(light); camera.add(light.target); light.target.position.z = -10;
+
+            setupControls();
+        }
+
+        function createDetailedTree(x, z) {
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 8), new THREE.MeshStandardMaterial({color: 0x2b1d0e}));
+            const leaves = new THREE.Mesh(new THREE.SphereGeometry(3, 8, 8), new THREE.MeshStandardMaterial({color: 0x0a220a}));
+            trunk.position.set(x, 4, z);
+            leaves.position.set(x, 8, z);
+            scene.add(trunk); scene.add(leaves);
+        }
+
+        function createTeletubbie(col, name, x, z, antType) {
+            const g = new THREE.Group();
+            const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.7, 1.4), new THREE.MeshStandardMaterial({color: col}));
+            g.add(b);
+            // Antena
+            const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.5), b.material);
+            ant.position.y = 1.2; g.add(ant);
+            g.position.set(x, 1.1, z);
+            g.userData = { name: name };
+            scene.add(g);
+            return g;
+        }
+
+        function setupControls() {
+            const joys = [{id:'joy-move', knob:'move-knob', isMove:true}, {id:'joy-look', knob:'look-knob', isMove:false}];
+            joys.forEach(j => {
+                const base = document.getElementById(j.id);
+                const knob = document.getElementById(j.knob);
+                base.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const t = e.targetTouches[0];
+                    const r = base.getBoundingClientRect();
+                    const dx = t.clientX - (r.left + 55), dy = t.clientY - (r.top + 55);
+                    const d = Math.min(Math.sqrt(dx*dx + dy*dy), 45);
+                    knob.style.transform = `translate(${(dx/45)*d}px,${(dy/45)*d}px)`;
+                    if(j.isMove) moveInput = {x:dx/45, y:dy/45}; else lookInput = {x:dx/45, y:dy/45};
+                });
+                base.addEventListener('touchend', () => { 
+                    knob.style.transform = ''; 
+                    if(j.isMove) moveInput={x:0,y:0}; else lookInput={x:0,y:0}; 
+                });
+            });
+            document.getElementById('jump-btn').addEventListener('touchstart', () => { if(isGrounded) { vy = 0.3; isGrounded = false; } });
+        }
+
+        function startGame(tiempo) {
+            document.querySelectorAll('.overlay-screen').forEach(s => s.style.display = 'none');
+            initScene(tiempo);
+            gameActive = true;
+            animate();
+        }
+
+        function talkToNooNoo() {
+            const box = document.getElementById('dialog-box');
+            const txt = document.getElementById('dialog-text');
+            box.style.display = 'block';
+            txt.innerText = "He infectado las papillas... pronto, todos serán como Tinky Winky. El mundo será perfecto y vacío.";
+            setTimeout(() => { box.style.display = 'none'; }, 5000);
+        }
+
+        function animate() {
+            if(!gameActive) return;
+            requestAnimationFrame(animate);
+
+            player.position.addScaledVector(new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion), -moveInput.y * 0.18);
+            player.position.addScaledVector(new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion), moveInput.x * 0.18);
+
+            vy -= 0.015; player.position.y += vy;
+            if(player.position.y <= 0) { player.position.y = 0; vy = 0; isGrounded = true; }
+
+            player.rotation.y -= lookInput.x * 0.05;
+            camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - lookInput.y * 0.05));
+
+            // Interacción con Noo-Noo
+            if(mode === 'history' && player.position.distanceTo(new THREE.Vector3(-40, 0, -40)) < 5) {
+                talkToNooNoo();
+            }
+
+            papillas.forEach((p, i) => {
+                if(p.position.distanceTo(player.position) < 2) {
+                    scene.remove(p); papillas.splice(i,1);
+                    score++;
+                    document.getElementById('contador').innerText = `PAPILLAS: ${score}/10`;
+                }
+            });
+
+            enemies.forEach(e => {
+                e.lookAt(player.position.x, 1.2, player.position.z);
+                e.translateZ(0.13);
+                if(e.position.distanceTo(player.position) < 2) {
+                    gameActive = false;
+                    document.getElementById('jumpscare').style.display = 'flex';
+                    setTimeout(() => location.reload(), 2000);
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
