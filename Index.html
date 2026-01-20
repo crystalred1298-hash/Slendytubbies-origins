@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ST: Origins - Camera Fix</title>
+    <style>
+        :root { --accent: #ff00ff; --gui: rgba(0,0,0,0.9); }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; width: 100vw; height: 100vh; }
+
+        /* HUD */
+        #ui-container { position: absolute; top: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 1500; pointer-events: none; }
+        #contador { background: var(--gui); color: var(--accent); padding: 10px 20px; border: 1px solid var(--accent); font-weight: bold; margin-bottom: 5px; }
+        
+        #dialog-box { position: absolute; bottom: 180px; width: 90%; left: 5%; background: var(--gui); color: #fff; padding: 15px; border: 2px solid #00ff00; z-index: 2500; display: none; }
+
+        /* Controles */
+        .joystick-base { position: absolute; width: 100px; height: 100px; background: rgba(255,255,255,0.1); border: 2px solid var(--accent); border-radius: 50%; z-index: 2000; bottom: 30px; }
+        #joy-move { left: 20px; }
+        #joy-look { right: 20px; }
+        .knob { position: absolute; width: 40px; height: 40px; background: var(--accent); border-radius: 50%; top: 28px; left: 28px; }
+        
+        #btn-cam { position: absolute; top: 20px; right: 20px; width: 50px; height: 50px; background: var(--gui); border: 1px solid white; color: white; z-index: 2000; border-radius: 5px; font-size: 10px; cursor: pointer; }
+        #jump-btn { position: absolute; right: 20px; bottom: 150px; width: 60px; height: 60px; background: rgba(255,0,255,0.2); border: 2px solid var(--accent); border-radius: 50%; color: white; z-index: 2000; display: flex; align-items: center; justify-content: center; }
+
+        .overlay-screen { position: absolute; width: 100%; height: 100%; z-index: 3000; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #000; color: var(--accent); text-align: center; }
+        .play-btn { padding: 12px 25px; background: transparent; color: var(--accent); border: 1px solid var(--accent); cursor: pointer; margin: 8px; width: 260px; text-transform: uppercase; font-weight: bold; }
+        
+        #jumpscare { position: absolute; width: 100%; height: 100%; background: #000; z-index: 5000; display: none; align-items: center; justify-content: center; }
+        #jumpscare img { width: 100%; height: 100%; object-fit: cover; }
+
+        .color-picker { display: flex; gap: 10px; margin-top: 20px; }
+        .dot { width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="jumpscare"><img src="https://i.imgur.com/vHqQ9zS.jpg"></div>
+    <div id="ui-container"><div id="contador">PAPILLAS: 0/10</div></div>
+    <div id="dialog-box"><b>NOO-NOO:</b> <span id="dialog-text">...</span></div>
+    
+    <button id="btn-cam" onclick="toggleCam()">CAM</button>
+    <div id="joy-move" class="joystick-base"><div id="move-knob" class="knob"></div></div>
+    <div id="joy-look" class="joystick-base"><div id="look-knob" class="knob"></div></div>
+    <div id="jump-btn">SALTO</div>
+
+    <div id="menu-inicio" class="overlay-screen">
+        <h1 style="font-size: 3rem; text-shadow: 0 0 20px red;">ST: ORIGINS</h1>
+        <button class="play-btn" onclick="setMode('history')">MODO HISTORIA</button>
+        <button class="play-btn" onclick="setMode('collect')">RECOGER PAPILLAS</button>
+        <button class="play-btn" onclick="showScreen('menu-inicio', 'menu-custom')">PERSONALIZACIÓN</button>
+    </div>
+
+    <div id="menu-custom" class="overlay-screen" style="display:none">
+        <h2>PERSONALIZA TU PERSONAJE</h2>
+        <div class="color-picker">
+            <div class="dot" style="background:white" onclick="changePCol(0xffffff)"></div>
+            <div class="dot" style="background:cyan" onclick="changePCol(0x00ffff)"></div>
+            <div class="dot" style="background:lime" onclick="changePCol(0x00ff00)"></div>
+            <div class="dot" style="background:yellow" onclick="changePCol(0xffff00)"></div>
+            <div class="dot" style="background:red" onclick="changePCol(0xff0000)"></div>
+        </div>
+        <button class="play-btn" style="margin-top:40px" onclick="showScreen('menu-custom', 'menu-inicio')">GUARDAR</button>
+    </div>
+
+    <div id="menu-tiempo" class="overlay-screen" style="display:none">
+        <h2>TIEMPO ATMOSFÉRICO</h2>
+        <button class="play-btn" onclick="startGame('dia')">DÍA</button>
+        <button class="play-btn" onclick="startGame('noche')">NOCHE</button>
+    </div>
+
+    <div id="demo-end" class="overlay-screen" style="display:none">
+        <h1 style="color:white">GRACIAS POR JUGAR</h1>
+        <p>Has llegado al límite de la Demo.</p>
+        <button class="play-btn" onclick="location.reload()">VOLVER AL MENU</button>
+    </div>
+
+    <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, player, playerBody, enemies = [], papillas = [], winRock;
+        let score = 0, gameActive = false, mode = 'collect', betrayed = false;
+        let moveInput = {x:0, y:0}, lookInput = {x:0, y:0}, vy = 0, isGrounded = true;
+        let playerColor = 0xffffff, isThirdPerson = false;
+
+        function changePCol(c) { playerColor = c; if(playerBody) playerBody.children[0].material.color.setHex(c); }
+        function showScreen(h, s) { document.getElementById(h).style.display = 'none'; document.getElementById(s).style.display = 'flex'; }
+        function setMode(m) { mode = m; showScreen('menu-inicio', 'menu-tiempo'); }
+        
+        function toggleCam() { 
+            isThirdPerson = !isThirdPerson;
+            // Resetear rotación de cámara al cambiar modo para evitar desorientación
+            camera.rotation.set(0,0,0);
+        }
+
+        function initScene(tiempo) {
+            scene = new THREE.Scene();
+            let fogCol = tiempo === 'dia' ? 0x87CEEB : 0x010205;
+            scene.background = new THREE.Color(fogCol);
+            scene.fog = new THREE.Fog(fogCol, 1, 85);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            player = new THREE.Group();
+            scene.add(player);
+
+            // CUERPO DEL JUGADOR (Añadido al grupo player)
+            playerBody = new THREE.Group();
+            const bodyMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1), new THREE.MeshStandardMaterial({color: playerColor}));
+            const handL = new THREE.Mesh(new THREE.SphereGeometry(0.15), bodyMesh.material);
+            const handR = new THREE.Mesh(new THREE.SphereGeometry(0.15), bodyMesh.material);
+            handL.position.set(-0.7, 0, 0); handR.position.set(0.7, 0, 0);
+            const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.2), new THREE.MeshStandardMaterial({color: 0x111111}));
+            hat.position.y = 1; 
+            playerBody.add(bodyMesh, handL, handR, hat);
+            playerBody.position.y = 0.9;
+            player.add(playerBody);
+
+            // LA CÁMARA AHORA ES HIJA DEL JUGADOR PARA QUE LO SIGA SIEMPRE
+            player.add(camera);
+
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({color: 0x0a140a}));
+            ground.rotation.x = -Math.PI/2; scene.add(ground);
+
+            // MONTAÑAS (Límites)
+            for(let i=0; i<40; i++) {
+                const angle = (i/40)*Math.PI*2;
+                const mtn = new THREE.Mesh(new THREE.ConeGeometry(20, 40, 4), new THREE.MeshStandardMaterial({color: 0x151515}));
+                mtn.position.set(Math.cos(angle)*160, 10, Math.sin(angle)*160);
+                scene.add(mtn);
+            }
+
+            for(let i=0; i<150; i++) {
+                const x = Math.random()*280-140, z = Math.random()*280-140;
+                if(Math.abs(x) > 12 || Math.abs(z) > 12) createTree(x, z);
+            }
+
+            winRock = new THREE.Mesh(new THREE.DodecahedronGeometry(2), new THREE.MeshStandardMaterial({color: 0x888888, emissive: 0x00ff00, emissiveIntensity: 0}));
+            winRock.position.set(80, 1, 80); scene.add(winRock);
+
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(12, 32, 16, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshStandardMaterial({color: 0x1a331a, side: THREE.DoubleSide}));
+            dome.position.set(-45, 0, -45); scene.add(dome);
+
+            const noonoo = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 3), new THREE.MeshStandardMaterial({color: 0x0000ff}));
+            noonoo.position.set(-45, 0.75, -45); scene.add(noonoo);
+
+            enemies.push(createTeletubbie(0x2a0050, "Tinky", 20, -70));
+            
+            for(let i=0; i<10; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff}));
+                p.position.set(Math.random()*200-100, 0.5, Math.random()*200-100);
+                scene.add(p); papillas.push(p);
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, tiempo==='dia'?0.5:0.05));
+            const flashlight = new THREE.SpotLight(0xffffff, 4, 60, 0.4);
+            player.add(flashlight); flashlight.position.y = 1.6; flashlight.target.position.z = -10; player.add(flashlight.target);
+
+            setupControls();
+        }
+
+        function createTree(x, z) {
+            const t = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 8), new THREE.MeshStandardMaterial({color: 0x1d140a}));
+            const l = new THREE.Mesh(new THREE.SphereGeometry(3), new THREE.MeshStandardMaterial({color: 0x071a07}));
+            t.position.set(x, 4, z); l.position.set(x, 8, z);
+            scene.add(t, l);
+        }
+
+        function createTeletubbie(col, name, x, z) {
+            const g = new THREE.Group();
+            const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.7, 1.4), new THREE.MeshStandardMaterial({color: col}));
+            g.add(b); g.position.set(x, 1.1, z); g.userData = { name, speed: 0.16 };
+            scene.add(g); return g;
+        }
+
+        function setupControls() {
+            const joys = [{id:'joy-move', knob:'move-knob', isMove:true}, {id:'joy-look', knob:'look-knob', isMove:false}];
+            joys.forEach(j => {
+                const base = document.getElementById(j.id); const knob = document.getElementById(j.knob);
+                base.addEventListener('touchmove', (e) => {
+                    e.preventDefault(); const t = e.targetTouches[0]; const r = base.getBoundingClientRect();
+                    const dx = t.clientX - (r.left + 50), dy = t.clientY - (r.top + 50);
+                    const d = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+                    knob.style.transform = `translate(${(dx/40)*d}px,${(dy/40)*d}px)`;
+                    if(j.isMove) moveInput = {x:dx/40, y:dy/40}; else lookInput = {x:dx/40, y:dy/40};
+                });
+                base.addEventListener('touchend', () => { knob.style.transform = ''; if(j.isMove) moveInput={x:0,y:0}; else lookInput={x:0,y:0}; });
+            });
+            document.getElementById('jump-btn').addEventListener('touchstart', () => { if(isGrounded) { vy = 0.32; isGrounded = false; } });
+        }
+
+        function startGame(t) { 
+            document.querySelectorAll('.overlay-screen').forEach(s => s.style.display = 'none'); 
+            initScene(t); gameActive = true; animate(); 
+        }
+
+        function animate() {
+            if(!gameActive) return; requestAnimationFrame(animate);
+
+            // MOVIMIENTO
+            player.position.addScaledVector(new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion), -moveInput.y * 0.22);
+            player.position.addScaledVector(new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion), moveInput.x * 0.22);
+            
+            vy -= 0.016; player.position.y += vy;
+            if(player.position.y <= 0) { player.position.y = 0; vy = 0; isGrounded = true; }
+            player.rotation.y -= lookInput.x * 0.06;
+
+            // LÓGICA DE CÁMARA CORREGIDA
+            if(isThirdPerson) {
+                camera.position.set(0, 3.5, 6); // Posición fija relativa al padre (player)
+                camera.lookAt(new THREE.Vector3(0, 1.5, -2).applyQuaternion(player.quaternion).add(player.position));
+                playerBody.visible = true; // Ver el cuerpo
+            } else {
+                camera.position.set(0, 1.7, -0.2); // Cámara en la cabeza
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - lookInput.y * 0.06));
+                playerBody.visible = false; // Ocultar cuerpo en 1ra persona para que no estorbe
+            }
+
+            // EVENTOS MODO HISTORIA
+            if(mode === 'history' && player.position.distanceTo(new THREE.Vector3(-45, 0, -45)) < 7 && !betrayed) {
+                betrayed = true;
+                document.getElementById('dialog-box').style.display = 'block';
+                document.getElementById('dialog-text').innerText = "¡EL FIN SE ACERCA! Huye a las montañas o quédate a morir.";
+                winRock.material.emissiveIntensity = 3;
+                setTimeout(() => document.getElementById('dialog-box').style.display = 'none', 5000);
+            }
+            
+            // LÍMITE DE MAPA (DEMO)
+            if(mode === 'history' && betrayed && (player.position.length() > 145)) {
+                gameActive = false; document.getElementById('demo-end').style.display = 'flex';
+            }
+
+            // PAPILLAS Y VELOCIDAD
+            papillas.forEach((p, i) => {
+                if(p.position.distanceTo(player.position) < 2.2) {
+                    scene.remove(p); papillas.splice(i,1); score++;
+                    document.getElementById('contador').innerText = `PAPILLAS: ${score}/10`;
+                    enemies.forEach(e => e.userData.speed += 0.015);
+                }
+            });
+
+            // ENEMIGOS
+            enemies.forEach(e => {
+                e.lookAt(player.position.x, 1.1, player.position.z);
+                e.translateZ(e.userData.speed);
+                if(e.position.distanceTo(player.position) < 2.5) {
+                    gameActive = false; document.getElementById('jumpscare').style.display = 'flex';
+                    setTimeout(() => location.reload(), 2000);
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
